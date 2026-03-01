@@ -1,0 +1,199 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  BUYER
+  SELLER
+}
+
+enum BusinessStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AddressType {
+  BILLING
+  SHIPPING
+  WAREHOUSE
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_PAYMENT
+  PAID
+  ACCEPTED
+  READY_FOR_PICKUP
+  IN_DELIVERY
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum DeliveryStatus {
+  PENDING
+  PICKED_UP
+  OUT_FOR_DELIVERY
+  DELIVERED
+}
+
+enum TransactionType {
+  BUYER_TRANSFER
+  SELLER_PAYOUT
+  PLATFORM_COMMISSION
+}
+
+enum TransactionStatus {
+  HELD
+  RELEASED
+  REFUNDED
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  role         Role
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  business     Business?
+}
+
+model Business {
+  id          String         @id @default(uuid())
+  userId      String         @unique
+  user        User           @relation(fields: [userId], references: [id])
+  taxNumber   String         @unique
+  taxOffice   String
+  companyName String
+  storeName   String
+  status      BusinessStatus @default(PENDING)
+  bizCode     String?        @unique // WHS-KOD for Sellers, BIZ-KOD for Buyers
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  addresses         Address[]
+  buyerOrders       Order[]      @relation("BuyerOrders")
+  sellerOffers      Offer[]
+  sellerOrderItems  OrderItem[]
+  sellerDeliveries  OrderDelivery[]
+}
+
+model Address {
+  id         String      @id @default(uuid())
+  businessId String
+  business   Business    @relation(fields: [businessId], references: [id])
+  city       String
+  district   String
+  fullAddress String
+  type       AddressType
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+model Category {
+  id        String     @id @default(uuid())
+  name      String
+  parentId  String?
+  parent    Category?  @relation("SubCategories", fields: [parentId], references: [id])
+  children  Category[] @relation("SubCategories")
+  masterSkus MasterSku[]
+}
+
+model MasterSku {
+  id          String    @id @default(uuid())
+  gtin        String    @unique // Barcode
+  brandName   String
+  productName String
+  packageSize String
+  categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id])
+  imageUrl    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  offers      Offer[]
+}
+
+model Offer {
+  id             String    @id @default(uuid())
+  masterSkuId    String
+  masterSku      MasterSku @relation(fields: [masterSkuId], references: [id])
+  sellerId       String
+  seller         Business  @relation(fields: [sellerId], references: [id])
+  price          Decimal   @db.Decimal(10, 2)
+  stockQty       Int
+  reservedQty    Int       @default(0)
+  minOrderQty    Int       @default(1)
+  leadTimeDays   Int
+  validUntil     DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  orderItems     OrderItem[]
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  buyerId        String
+  buyer          Business    @relation("BuyerOrders", fields: [buyerId], references: [id])
+  orderCode      String      @unique
+  totalAmount    Decimal     @db.Decimal(10, 2)
+  status         OrderStatus @default(DRAFT)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  items          OrderItem[]
+  deliveries     OrderDelivery[]
+  transactions   Transaction[]
+}
+
+model OrderItem {
+  id                String    @id @default(uuid())
+  orderId           String
+  order             Order     @relation(fields: [orderId], references: [id])
+  offerId           String
+  offer             Offer     @relation(fields: [offerId], references: [id])
+  sellerId          String
+  seller            Business  @relation(fields: [sellerId], references: [id])
+  unitPriceAtPurchase Decimal @db.Decimal(10, 2)
+  quantity          Int
+  createdAt         DateTime  @default(now())
+}
+
+model OrderDelivery {
+  id           String         @id @default(uuid())
+  orderId      String
+  order        Order          @relation(fields: [orderId], references: [id])
+  sellerId     String
+  seller       Business       @relation(fields: [sellerId], references: [id])
+  trackingCode String?        @unique
+  status       DeliveryStatus @default(PENDING)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model Transaction {
+  id              String            @id @default(uuid())
+  orderId         String
+  order           Order             @relation(fields: [orderId], references: [id])
+  transactionType TransactionType
+  amount          Decimal           @db.Decimal(10, 2)
+  status          TransactionStatus @default(HELD)
+  adminApprovedAt DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}

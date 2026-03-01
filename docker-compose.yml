@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: ordino_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ordino_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ordino_password}
+      POSTGRES_DB: ${POSTGRES_DB:-ordino_db}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ordino_network
+
+  redis-cache:
+    image: redis:7-alpine
+    container_name: ordino_redis
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ordino_network
+
+  api-service:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: ordino_api
+    restart: unless-stopped
+    depends_on:
+      - postgres-db
+      - redis-cache
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ordino_admin}:${POSTGRES_PASSWORD:-ordino_password}@postgres-db:5432/${POSTGRES_DB:-ordino_db}?schema=public
+      - REDIS_URL=redis://redis-cache:6379
+    ports:
+      - "3000:3000"
+    networks:
+      - ordino_network
+
+  admin-frontend:
+    build:
+      context: .
+      dockerfile: apps/admin-web/Dockerfile
+    container_name: ordino_admin_web
+    restart: unless-stopped
+    depends_on:
+      - api-service
+    ports:
+      - "3001:3000"
+    networks:
+      - ordino_network
+
+  buyer-frontend:
+    build:
+      context: .
+      dockerfile: apps/buyer-web/Dockerfile
+    container_name: ordino_buyer_web
+    restart: unless-stopped
+    depends_on:
+      - api-service
+    ports:
+      - "3002:3000"
+    networks:
+      - ordino_network
+
+  seller-frontend:
+    build:
+      context: .
+      dockerfile: apps/seller-web/Dockerfile
+    container_name: ordino_seller_web
+    restart: unless-stopped
+    depends_on:
+      - api-service
+    ports:
+      - "3003:3000"
+    networks:
+      - ordino_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+
+networks:
+  ordino_network:
+    driver: bridge
