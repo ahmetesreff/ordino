@@ -15,6 +15,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - ordino_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ordino_admin} -d ${POSTGRES_DB:-ordino_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis-cache:
     image: redis:7-alpine
@@ -26,6 +31,11 @@ services:
       - redis_data:/data
     networks:
       - ordino_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   api-service:
     build:
@@ -34,11 +44,15 @@ services:
     container_name: ordino_api
     restart: unless-stopped
     depends_on:
-      - postgres-db
-      - redis-cache
+      postgres-db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-ordino_admin}:${POSTGRES_PASSWORD:-ordino_password}@postgres-db:5432/${POSTGRES_DB:-ordino_db}?schema=public
       - REDIS_URL=redis://redis-cache:6379
+      - JWT_SECRET=${JWT_SECRET:-ordino_dev_secret_change_in_production}
+      - NODE_ENV=production
     ports:
       - "3000:3000"
     networks:
@@ -48,6 +62,8 @@ services:
     build:
       context: .
       dockerfile: apps/admin-web/Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3000}
     container_name: ordino_admin_web
     restart: unless-stopped
     depends_on:
@@ -61,6 +77,8 @@ services:
     build:
       context: .
       dockerfile: apps/buyer-web/Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3000}
     container_name: ordino_buyer_web
     restart: unless-stopped
     depends_on:
@@ -74,6 +92,8 @@ services:
     build:
       context: .
       dockerfile: apps/seller-web/Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3000}
     container_name: ordino_seller_web
     restart: unless-stopped
     depends_on:
@@ -86,7 +106,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-
 
 networks:
   ordino_network:

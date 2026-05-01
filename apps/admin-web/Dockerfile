@@ -2,6 +2,8 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN npm ci
+ARG NEXT_PUBLIC_API_URL=http://localhost:3000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build --workspace=admin-web
 
 FROM node:20-alpine AS runner
