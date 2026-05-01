@@ -68,7 +68,18 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
+  buyer        Buyer?
   business     Business?
+}
+
+model Buyer {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders    Order[]
 }
 
 model Business {
@@ -85,7 +96,6 @@ model Business {
   updatedAt   DateTime       @updatedAt
 
   addresses         Address[]
-  buyerOrders       Order[]      @relation("BuyerOrders")
   sellerOffers      Offer[]
   sellerOrderItems  OrderItem[]
   sellerDeliveries  OrderDelivery[]
@@ -149,7 +159,7 @@ model Offer {
 model Order {
   id             String      @id @default(uuid())
   buyerId        String
-  buyer          Business    @relation("BuyerOrders", fields: [buyerId], references: [id])
+  buyer          Buyer       @relation(fields: [buyerId], references: [id])
   orderCode      String      @unique
   totalAmount    Decimal     @db.Decimal(10, 2)
   status         OrderStatus @default(DRAFT)

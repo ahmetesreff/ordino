@@ -1,15 +1,34 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { Role, BusinessStatus } from '@ordino/database';
+import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
+    private static readonly INVALID_PASSWORD_HASH = '$2b$10$' + '.'.repeat(53);
+
     constructor(
         private prisma: PrismaService,
         private jwtService: JwtService,
     ) { }
+
+    async validateBuyerCredentials(email: string, pass: string): Promise<any> {
+        const user = await this.prisma.client.user.findUnique({
+            where: { email },
+        });
+
+        const candidatePasswordHash = user?.passwordHash ?? AuthService.INVALID_PASSWORD_HASH;
+        const isMatch = await bcrypt.compare(pass, candidatePasswordHash);
+
+        if (!user || user.role !== Role.BUYER || !user.isActive || !isMatch) {
+            return null;
+        }
+
+        const { passwordHash, ...result } = user;
+        return result;
+    }
 
     async validateUser(email: string, pass: string): Promise<any> {
         const user = await this.prisma.client.user.findUnique({
@@ -17,44 +36,67 @@ export class AuthService {
             include: { business: true }
         });
 
-        if (!user || (!user.isActive)) return null;
+        const candidatePasswordHash = user?.passwordHash ?? AuthService.INVALID_PASSWORD_HASH;
+        const isMatch = await bcrypt.compare(pass, candidatePasswordHash);
 
-        if (user.role !== Role.ADMIN && user.business?.status !== BusinessStatus.APPROVED) {
+        if (!user || (!user.isActive) || !isMatch) return null;
+
+        if (
+            user.role === Role.BUYER ||
+            (user.role !== Role.ADMIN && user.business?.status !== BusinessStatus.APPROVED)
+        ) {
             return null; // Reject login if business is not approved
         }
 
-        const isMatch = await bcrypt.compare(pass, user.passwordHash);
-        if (isMatch) {
-            const { passwordHash, ...result } = user;
-            return result;
-        }
-        return null;
+        const { passwordHash, ...result } = user;
+        return result;
     }
 
-    async login(user: any) {
+    async login(email: string, pass: string) {
+        const user = await this.validateUser(email, pass);
+        if (!user) {
+            throw new UnauthorizedException('Invalid credentials or account inactive');
+        }
+
+        return this.signToken(user);
+    }
+
+    async loginBuyer(email: string, pass: string) {
+        const user = await this.validateBuyerCredentials(email, pass);
+        if (!user) {
+            throw new UnauthorizedException('Invalid credentials or account inactive');
+        }
+
+        return this.signToken(user);
+    }
+
+    private signToken(user: any) {
         const payload = { email: user.email, sub: user.id, role: user.role, businessId: user.business?.id };
         return {
             access_token: this.jwtService.sign(payload),
-            user,
         };
     }
 
-    async registerBuyer(data: any) {
+    async createUser(data: RegisterDto, role: Role) {
+        await this.ensureEmailAvailable(data.email);
         const hashedPassword = await bcrypt.hash(data.password, 10);
-        // Draft logic for creating a user and a business
         const user = await this.prisma.client.user.create({
             data: {
                 email: data.email,
                 passwordHash: hashedPassword,
-                role: Role.BUYER,
-                business: {
-                    create: {
-                        taxNumber: data.taxNumber,
-                        taxOffice: data.taxOffice,
-                        companyName: data.companyName,
-                        storeName: data.storeName,
+                role,
+                ...(role !== Role.BUYER
+                    ? {
+                        business: {
+                            create: {
+                                taxNumber: data.taxNumber,
+                                taxOffice: data.taxOffice,
+                                companyName: data.companyName,
+                                storeName: data.storeName,
+                            }
+                        }
                     }
-                }
+                    : {})
             },
             include: { business: true }
         });
@@ -63,27 +105,25 @@ export class AuthService {
         return result;
     }
 
-    async registerSeller(data: any) {
-        const hashedPassword = await bcrypt.hash(data.password, 10);
-        // Draft logic for creating a user and a business (seller)
-        const user = await this.prisma.client.user.create({
-            data: {
-                email: data.email,
-                passwordHash: hashedPassword,
-                role: Role.SELLER,
-                business: {
-                    create: {
-                        taxNumber: data.taxNumber,
-                        taxOffice: data.taxOffice,
-                        companyName: data.companyName,
-                        storeName: data.storeName,
-                    }
-                }
-            },
-            include: { business: true }
+    async registerBuyer(data: RegisterDto) {
+        const user = await this.createUser(data, Role.BUYER);
+        return this.signToken(user);
+    }
+
+    async registerSeller(data: RegisterDto, actorRole?: Role) {
+        if (actorRole !== Role.ADMIN) {
+            throw new ForbiddenException();
+        }
+        return this.createUser(data, Role.SELLER);
+    }
+
+    private async ensureEmailAvailable(email: string) {
+        const existingUser = await this.prisma.client.user.findUnique({
+            where: { email }
         });
 
-        const { passwordHash, ...result } = user;
-        return result;
+        if (existingUser) {
+            throw new BadRequestException('Email already in use');
+        }
     }
 }

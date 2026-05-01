@@ -1,27 +1,28 @@
-import { IsNotEmpty, IsString, IsNumber, Min } from 'class-validator';
+import { IsDefined, IsInt, IsNotEmpty, IsNumber, IsString, Min } from 'class-validator';
 
 export class CreateOfferDto {
+    @IsDefined()
     @IsNotEmpty()
     @IsString()
     masterSkuId: string;
 
-    @IsNotEmpty()
+    @IsDefined()
     @IsNumber()
     @Min(0.01)
     price: number;
 
-    @IsNotEmpty()
-    @IsNumber()
+    @IsDefined()
+    @IsInt()
     @Min(1)
-    stockQty: number;
+    quantity: number;
 
-    @IsNotEmpty()
-    @IsNumber()
+    @IsDefined()
+    @IsInt()
     @Min(1)
     minOrderQty: number;
 
-    @IsNotEmpty()
-    @IsNumber()
+    @IsDefined()
+    @IsInt()
     @Min(0)
     leadTimeDays: number;
 }

@@ -1,33 +1,72 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateOfferDto } from './dto/create-offer.dto';
+
+type UpdateOfferData = Partial<Pick<CreateOfferDto, 'price' | 'quantity' | 'minOrderQty' | 'leadTimeDays'>>;
 
 @Injectable()
 export class OfferService {
     constructor(private prisma: PrismaService) { }
 
-    async createOffer(sellerId: string, data: any) {
+    async validateOfferPrice(masterSkuId: string, price: number): Promise<boolean> {
+        const product = await this.prisma.client.masterSku.findUnique({
+            where: { id: masterSkuId },
+            select: { floorPrice: true }
+        });
+
+        if (!product) {
+            throw new NotFoundException('Product not found');
+        }
+
+        const { floorPrice } = product;
+
+        if (floorPrice === undefined || floorPrice === null) {
+            return true;
+        }
+
+        return price > floorPrice;
+    }
+
+    async create(sellerId: string, data: CreateOfferDto) {
+        const isValidPrice = await this.validateOfferPrice(data.masterSkuId, data.price);
+
+        if (!isValidPrice) {
+            throw new BadRequestException('Offer price must be above product floor price');
+        }
+
         return this.prisma.client.offer.create({
             data: {
                 masterSkuId: data.masterSkuId,
                 sellerId,
                 price: data.price,
-                stockQty: data.stockQty,
+                stockQty: data.quantity,
                 minOrderQty: data.minOrderQty,
                 leadTimeDays: data.leadTimeDays,
-                validUntil: data.validUntil ? new Date(data.validUntil) : null,
             }
         });
     }
 
-    async updateOffer(offerId: string, sellerId: string, data: any) {
+    async updateOffer(offerId: string, sellerId: string, data: UpdateOfferData) {
         const offer = await this.prisma.client.offer.findFirst({
             where: { id: offerId, sellerId }
         });
         if (!offer) throw new NotFoundException('Offer not found or unauthorized');
 
+        const updateData: {
+            price?: number;
+            stockQty?: number;
+            minOrderQty?: number;
+            leadTimeDays?: number;
+        } = {};
+
+        if (data.price !== undefined) updateData.price = data.price;
+        if (data.quantity !== undefined) updateData.stockQty = data.quantity;
+        if (data.minOrderQty !== undefined) updateData.minOrderQty = data.minOrderQty;
+        if (data.leadTimeDays !== undefined) updateData.leadTimeDays = data.leadTimeDays;
+
         return this.prisma.client.offer.update({
             where: { id: offerId },
-            data
+            data: updateData
         });
     }
 

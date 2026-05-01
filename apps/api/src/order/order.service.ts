@@ -6,6 +6,41 @@ import { OrderStatus } from '@ordino/database';
 export class OrderService {
     constructor(private prisma: PrismaService) { }
 
+    private readonly allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
+        [OrderStatus.DRAFT]: [OrderStatus.PAID, OrderStatus.CANCELLED],
+        [OrderStatus.PAID]: [OrderStatus.ACCEPTED, OrderStatus.CANCELLED],
+        [OrderStatus.ACCEPTED]: [OrderStatus.READY_FOR_PICKUP, OrderStatus.CANCELLED],
+        [OrderStatus.READY_FOR_PICKUP]: [OrderStatus.IN_DELIVERY, OrderStatus.CANCELLED],
+        [OrderStatus.IN_DELIVERY]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
+        [OrderStatus.DELIVERED]: [OrderStatus.COMPLETED],
+        [OrderStatus.COMPLETED]: [],
+        [OrderStatus.CANCELLED]: []
+    };
+
+    async updateStatus(orderId: string, status: OrderStatus) {
+        return this.prisma.client.$transaction(async (tx) => {
+            const order = await tx.order.findUnique({
+                where: { id: orderId }
+            });
+
+            if (!order) {
+                throw new NotFoundException('Order not found');
+            }
+
+            const currentStatus = order.status as OrderStatus;
+            const nextAllowedStatuses = this.allowedTransitions[currentStatus];
+
+            if (!nextAllowedStatuses || !nextAllowedStatuses.includes(status)) {
+                throw new BadRequestException(`Invalid status transition from ${currentStatus} to ${status}`);
+            }
+
+            return tx.order.update({
+                where: { id: order.id },
+                data: { status }
+            });
+        });
+    }
+
     async createDraftOrder(buyerId: string, items: { offerId: string, quantity: number }[]) {
         // 1. Fetch offers
         const offerIds = items.map(i => i.offerId);
@@ -83,9 +118,17 @@ export class OrderService {
                 }
             }
 
-            return tx.order.update({
-                where: { id: orderId },
+            const updateResult = await tx.order.updateMany({
+                where: { id: orderId, status: OrderStatus.DRAFT },
                 data: { status: OrderStatus.PAID }
+            });
+
+            if (updateResult.count !== 1) {
+                throw new BadRequestException('Order status changed before this update could be applied');
+            }
+
+            return tx.order.findUniqueOrThrow({
+                where: { id: orderId }
             });
         });
     }
@@ -118,10 +161,7 @@ export class OrderService {
         });
         if (!order) throw new NotFoundException('Order not found or unauthorized');
 
-        return this.prisma.client.order.update({
-            where: { id: orderId },
-            data: { status: OrderStatus.ACCEPTED }
-        });
+        return this.updateStatus(orderId, OrderStatus.ACCEPTED);
     }
 
     async getAllOrdersAdmin() {

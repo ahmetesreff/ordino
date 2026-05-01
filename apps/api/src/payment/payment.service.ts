@@ -1,11 +1,94 @@
 // src/payment/payment.service.ts
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderStatus } from '@ordino/database';
 
+export interface ProcessPaymentInput {
+    orderId: string;
+    amount: number;
+    currency: string;
+    cardNumber?: string;
+}
+
+export const PAYMENT_PROVIDER = 'PAYMENT_PROVIDER';
+
+export interface PaymentInitializationResult {
+    transactionReference: string;
+}
+
+export interface PaymentProvider {
+    initializePayment(input: ProcessPaymentInput): Promise<PaymentInitializationResult>;
+    processPayment(input: ProcessPaymentInput): Promise<ProcessPaymentResult>;
+}
+
+export interface ProcessPaymentResult {
+    success: boolean;
+    message: string;
+    transactionReference?: string;
+}
+
+@Injectable()
+export class MockPaymentProvider implements PaymentProvider {
+    private static readonly IYZICO_TEST_CARDS = new Set([
+        '5528790000000008',
+        '5526080000000006',
+        '4111111111111111',
+    ]);
+
+    private readonly logger = new Logger(MockPaymentProvider.name);
+
+    async initializePayment(_input: ProcessPaymentInput): Promise<PaymentInitializationResult> {
+        return { transactionReference: `iyzico-mock-${Date.now()}` };
+    }
+
+    async processPayment(input: ProcessPaymentInput): Promise<ProcessPaymentResult> {
+        if (!input.cardNumber || !MockPaymentProvider.IYZICO_TEST_CARDS.has(input.cardNumber)) {
+            return {
+                success: false,
+                message: 'Mock iyzico payment failed.',
+            };
+        }
+
+        const { transactionReference } = await this.initializePayment(input);
+        this.logger.log(`Mock iyzico transaction: ${transactionReference}`);
+
+        return {
+            success: true,
+            message: 'Mock iyzico payment succeeded.',
+            transactionReference,
+        };
+    }
+}
+
 @Injectable()
 export class PaymentService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        @Inject(PAYMENT_PROVIDER)
+        private readonly paymentProvider: PaymentProvider,
+    ) { }
+
+    async initializePayment(input: ProcessPaymentInput): Promise<ProcessPaymentResult> {
+        if (!input.orderId || input.amount <= 0 || !input.currency) {
+            throw new BadRequestException('Invalid payment initialization input');
+        }
+
+        const { transactionReference } = await this.paymentProvider.initializePayment(input);
+
+        return {
+            success: true,
+            message: 'Payment initialized.',
+            transactionReference,
+        };
+    }
+
+    async processPayment(input: ProcessPaymentInput): Promise<ProcessPaymentResult> {
+        if (!input.orderId || input.amount <= 0 || !input.currency) {
+            throw new BadRequestException('Invalid payment initialization input');
+        }
+
+        return this.paymentProvider.processPayment(input);
+    }
 
     /**
      * For MVP: Manual Bank Transfer (Havale/EFT) Flow
@@ -19,41 +102,72 @@ export class PaymentService {
         });
 
         if (!order) throw new NotFoundException('Order not found');
-        if (order.status !== OrderStatus.DRAFT) {
-            throw new BadRequestException('Order cannot be paid from its current state');
-        }
-
-        return this.prisma.client.$transaction(async (tx) => {
+        await this.prisma.client.$transaction(async (tx) => {
             // 1. Reserve Stock
             for (const item of order.items) {
-                const updatedOffer = await tx.offer.update({
+                const offer = await tx.offer.findUnique({
                     where: { id: item.offerId },
+                    select: { stockQty: true, reservedQty: true }
+                });
+
+                if (!offer) {
+                    throw new NotFoundException(`Offer ${item.offerId} not found`);
+                }
+
+                const reservation = await tx.offer.updateMany({
+                    where: {
+                        id: item.offerId,
+                        reservedQty: offer.reservedQty,
+                        stockQty: { gte: offer.reservedQty + item.quantity }
+                    },
                     data: { reservedQty: { increment: item.quantity } }
                 });
-                if (updatedOffer.stockQty < updatedOffer.reservedQty) {
+
+                if (reservation.count !== 1) {
                     throw new BadRequestException(`Insufficient stock to complete order for offer ${item.offerId}`);
                 }
             }
 
-            // 2. Mark order as awaiting manual admin verification
-            // Re-using PAID here for simplicity in our DB schema, but in a real app
-            // we'd use AWAITING_PAYMENT_VERIFICATION
-            return tx.order.update({
-                where: { id: orderId },
-                data: { status: OrderStatus.PAID }
+            const statusUpdate = await tx.order.updateMany({
+                where: {
+                    id: orderId,
+                    status: OrderStatus.DRAFT,
+                },
+                data: { status: OrderStatus.PENDING_VERIFICATION }
             });
+
+            if (statusUpdate.count !== 1) {
+                throw new BadRequestException('Order cannot be paid from its current state');
+            }
         });
+
+        return { success: true, message: `Bank transfer for ${orderId} is awaiting admin verification.` };
     }
 
     /**
      * Admin verifies the EFT dropped into the bank account
      */
     async verifyBankTransfer(orderId: string) {
-        // In our schema, PAID implies funds are secured (Escrow simulated).
-        // Sellers can now see this order and Accept it.
+        const order = await this.prisma.client.order.findUnique({
+            where: { id: orderId }
+        });
 
-        // Logic handles splitting funds virtually if needed, but for MVP
-        // Admin just verifies.
-        return { success: true, message: `Payment for ${orderId} verified by admin.` };
+        if (!order) throw new NotFoundException('Order not found');
+
+        const statusUpdate = await this.prisma.client.order.updateMany({
+            where: {
+                id: orderId,
+                status: OrderStatus.PENDING_VERIFICATION,
+            },
+            data: { status: OrderStatus.PAID }
+        });
+
+        if (statusUpdate.count !== 1) {
+            throw new BadRequestException('Order cannot be verified from its current state');
+        }
+
+        return this.prisma.client.order.findUnique({
+            where: { id: orderId }
+        });
     }
 }

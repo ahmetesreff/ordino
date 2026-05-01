@@ -5,6 +5,10 @@ import { prisma, PrismaClient } from '@ordino/database';
 export class PrismaService implements OnModuleInit, OnModuleDestroy {
     public client: PrismaClient = prisma;
 
+    get buyer() {
+        return this.client.buyer;
+    }
+
     async onModuleInit() {
         await this.client.$connect();
     }
