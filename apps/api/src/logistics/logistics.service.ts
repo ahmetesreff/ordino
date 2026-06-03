@@ -18,7 +18,7 @@ export class LogisticsService {
                 createdAt: { gte: dateRangeStart, lte: dateRangeEnd }
             },
             include: {
-                buyer: true,
+                buyer: { include: { user: { include: { business: true } } } },
                 items: { include: { seller: true, offer: { include: { masterSku: true } } } }
             }
         });
@@ -31,8 +31,8 @@ export class LogisticsService {
                 exportData.push({
                     order_code: order.orderCode,
                     order_date: order.createdAt.toISOString(),
-                    buyer_vkn: order.buyer?.taxNumber,
-                    buyer_company: order.buyer?.companyName,
+                    buyer_vkn: order.buyer?.user?.business?.taxNumber,
+                    buyer_company: order.buyer?.user?.business?.companyName,
                     seller_code: item.seller?.bizCode || 'UNKNOWN',
                     gtin: item.offer?.masterSku?.gtin,
                     product_name: item.offer?.masterSku?.productName,

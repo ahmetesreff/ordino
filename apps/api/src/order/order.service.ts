@@ -7,7 +7,9 @@ export class OrderService {
     constructor(private prisma: PrismaService) { }
 
     private readonly allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
-        [OrderStatus.DRAFT]: [OrderStatus.PAID, OrderStatus.CANCELLED],
+        [OrderStatus.DRAFT]: [OrderStatus.PENDING_PAYMENT, OrderStatus.PENDING_VERIFICATION, OrderStatus.PAID, OrderStatus.CANCELLED],
+        [OrderStatus.PENDING_PAYMENT]: [OrderStatus.PAID, OrderStatus.CANCELLED],
+        [OrderStatus.PENDING_VERIFICATION]: [OrderStatus.PAID, OrderStatus.CANCELLED],
         [OrderStatus.PAID]: [OrderStatus.ACCEPTED, OrderStatus.CANCELLED],
         [OrderStatus.ACCEPTED]: [OrderStatus.READY_FOR_PICKUP, OrderStatus.CANCELLED],
         [OrderStatus.READY_FOR_PICKUP]: [OrderStatus.IN_DELIVERY, OrderStatus.CANCELLED],

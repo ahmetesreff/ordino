@@ -4,6 +4,7 @@ COPY . .
 RUN npm ci
 RUN npx prisma generate --schema=packages/database/prisma/schema.prisma
 RUN npm run build --workspace=@ordino/database
+RUN npm run build --workspace=@ordino/auth
 RUN npm run build --workspace=api
 
 FROM node:20-alpine AS runner

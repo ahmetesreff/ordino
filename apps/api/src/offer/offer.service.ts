@@ -24,7 +24,7 @@ export class OfferService {
             return true;
         }
 
-        return price > floorPrice;
+        return price > Number(floorPrice);
     }
 
     async create(sellerId: string, data: CreateOfferDto) {

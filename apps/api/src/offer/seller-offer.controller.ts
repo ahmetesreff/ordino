@@ -18,7 +18,7 @@ export class SellerOfferController {
         // Assuming user.sub is the userId, we need sellerBusinessId. 
         // In actual implementation, CurrentUser should fetch the related Business object.
         const sellerBusinessId = user.businessId;
-        return this.offerService.createOffer(sellerBusinessId, body);
+        return this.offerService.create(sellerBusinessId, body);
     }
 
     @Patch(':id')

@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@ordino/database';
 import { PrismaService } from '../prisma/prisma.service';
 
 type MasterSkuCreateData = {
     gtin: string;
     brandName: string;
     productName: string;
-    packageSize?: string;
+    packageSize: string;
     categoryId: string;
     imageUrl?: string;
 };
@@ -24,8 +25,7 @@ export class CatalogService {
         const normalizedSearch = search?.trim() || undefined;
         const take = this.getTake(limit);
         const currentPage = this.getPage(page);
-        const where = {
-            isActive: true,
+        const where: Prisma.MasterSkuWhereInput = {
             ...(categoryId && { categoryId }),
             ...(normalizedSearch && {
                 productName: { contains: normalizedSearch, mode: 'insensitive' },
@@ -33,12 +33,12 @@ export class CatalogService {
         };
 
         const [items, total] = await Promise.all([
-            this.prisma.client.product.findMany({
+            this.prisma.client.masterSku.findMany({
                 where,
                 skip: (currentPage - 1) * take,
                 take,
             }),
-            this.prisma.client.product.count({ where }),
+            this.prisma.client.masterSku.count({ where }),
         ]);
 
         return {
@@ -91,11 +91,8 @@ export class CatalogService {
     }
 
     async getProductById(id: string) {
-        const product = await this.prisma.client.product.findFirst({
-            where: {
-                id,
-                isActive: true,
-            }
+        const product = await this.prisma.client.masterSku.findUnique({
+            where: { id }
         });
         if (!product) throw new NotFoundException('Product not found');
         return product;

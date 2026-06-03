@@ -31,6 +31,7 @@ enum AddressType {
 enum OrderStatus {
   DRAFT
   PENDING_PAYMENT
+  PENDING_VERIFICATION
   PAID
   ACCEPTED
   READY_FOR_PICKUP
@@ -131,6 +132,7 @@ model MasterSku {
   categoryId  String
   category    Category  @relation(fields: [categoryId], references: [id])
   imageUrl    String?
+  floorPrice  Decimal?  @db.Decimal(10, 2) // Platform-set minimum allowed offer price
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
